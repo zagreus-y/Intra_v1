@@ -1,7 +1,7 @@
 from data.nse_data import NSEDataHybrid
 from broker.paper_broker import PaperBroker
 from strategies.sma_intraday import SMAIntraday
-from risk.stoploss import StopLossManager
+from risk.stoploss_manager import StopLossManager
 from engine.live_runner import LiveRunner
 import warnings
 
