@@ -1,108 +1,87 @@
 """
 VWAP Scalper Strategy
-- Computes VWAP from intraday bars
-- Simple bounce/mean reversion logic
-- Works with bar-driven LiveRunner
+Mean-reversion around VWAP using intraday candles
+Single-symbol, bar-driven
 """
 
 from collections import deque
 import numpy as np
+from strategies.base_strategy import BaseStrategy
 
 
-class VWAPScalper:
-    def __init__(self, params=None):
+class VWAPScalper(BaseStrategy):
+    def __init__(self, config):
         """
-        params optional:
-            threshold: % deviation from VWAP to trigger reversal
+        config = {
+            "symbol": str,
+            "threshold": float (% deviation),
+            "qty": int,
+            "window": int (rolling bars for VWAP)
+        }
         """
-        if params is None:
-            params = {}
+        super().__init__(config)
 
-        self.threshold = params.get("threshold", 0.25)  # 0.25% deviation
-        self.symbol = None
-        self.data_provider = None
-        self.broker = None
+        self.threshold = config.get("threshold", 0.25)  # percent deviation
+        self.qty = config.get("qty", 1)
+        self.window = config.get("window", 300)
 
-        # store (typical_price, volume)
-        self.typical_prices = deque(maxlen=400)  
-        self.volumes = deque(maxlen=400)
+        self.typical_prices = deque(maxlen=self.window)
+        self.volumes = deque(maxlen=self.window)
 
         self.last_signal = None
 
-    # ------------------------------
-    # preload historical bars
-    # ------------------------------
-    def on_start(self, symbol):
-        self.symbol = symbol
+    # -------------------------
+    def on_start(self):
+        pass
 
-        try:
-            df = self.data_provider.get_ohlcv(symbol, interval="1m", lookback=200)
-            if df is not None and not df.empty:
-                for _, row in df.iterrows():
-                    tp = (row["high"] + row["low"] + row["close"]) / 3
-                    self.typical_prices.append(tp)
-                    self.volumes.append(row["volume"])
-            print(f"[VWAP] Preloaded {len(self.typical_prices)} bars for {symbol}")
-        except:
-            print("[VWAP] Warning: failed to load historical bars")
-
-    def bind(self, data_provider, broker):
-        self.data_provider = data_provider
-        self.broker = broker
-
-    # ------------------------------
-    # VWAP calculation
-    # ------------------------------
-    def _get_vwap(self):
+    # -------------------------
+    def _vwap(self):
         tp = np.array(self.typical_prices)
         vol = np.array(self.volumes)
 
-        if tp.size == 0 or vol.size == 0:
+        if tp.size == 0 or vol.sum() == 0:
             return None
 
         return np.sum(tp * vol) / np.sum(vol)
 
-    # ------------------------------
-    # Called every new bar
-    # ------------------------------
-    def on_bar(self, symbol, bar):
-        close = float(bar["close"])
+    # -------------------------
+    def on_bar(self, bar):
         high = float(bar["high"])
         low = float(bar["low"])
-        vol = int(bar["volume"])
+        close = float(bar["close"])
+        volume = float(bar["volume"])
 
-        tp = (high + low + close) / 3
+        typical_price = (high + low + close) / 3
 
-        self.typical_prices.append(tp)
-        self.volumes.append(vol)
+        self.typical_prices.append(typical_price)
+        self.volumes.append(volume)
 
-        vwap = self._get_vwap()
+        vwap = self._vwap()
         if vwap is None:
             return None
 
-        deviation = (close - vwap) / vwap * 100  # in %
+        deviation_pct = (close - vwap) / vwap * 100
 
-        pos = self.broker.get_positions().get(symbol, 0)
-
-        # BUY when price dips sufficiently below VWAP
-        if deviation <= -self.threshold and self.last_signal != "buy" and pos == 0:
+        # BUY: price stretched below VWAP
+        if deviation_pct <= -self.threshold and self.last_signal != "buy":
             self.last_signal = "buy"
             return {
                 "action": "buy",
                 "price": close,
-                "qty": None
+                "qty": self.qty
             }
 
-        # SELL when price goes sufficiently above VWAP (take profit)
-        if deviation >= self.threshold and self.last_signal != "sell" and pos > 0:
+        # SELL: price stretched above VWAP
+        if deviation_pct >= self.threshold and self.last_signal != "sell":
             self.last_signal = "sell"
             return {
                 "action": "sell",
                 "price": close,
-                "qty": None
+                "qty": self.qty
             }
 
         return None
 
-    def on_stop(self, symbol):
-        print("[VWAP] Stopped.")
+    # -------------------------
+    def on_stop(self):
+        pass
