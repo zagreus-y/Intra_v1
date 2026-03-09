@@ -20,8 +20,8 @@ class VWAPMeanReversion(BaseStrategy):
     VWAP Mean Reversion Strategy
     
     Premise: Price bounces back to VWAP within a session.
-    Entry: Price > 2% above VWAP (sell) or < 2% below VWAP (buy)
-    Exit: Price returns to VWAP or stoploss
+    Entry: Price deviates >2% from VWAP (buy below, sell above)
+    Exit: Price returns to VWAP (mean reversion) or stoploss hit
     
     Stats: ~55-65% win rate on liquid stocks
     Best for: 5m, 15m intervals
@@ -29,68 +29,87 @@ class VWAPMeanReversion(BaseStrategy):
 
     def __init__(self, config):
         super().__init__(config)
-        self.deviation_pct = config.get("deviation_pct", 2.0)  # 2% deviation
+        self.deviation_pct = config.get("deviation_pct", 2.0)
         self.lookback = config.get("lookback", 100)
         
-        self.closes = deque(maxlen=self.lookback)
+        # Store Typical Price = (H+L+C)/3 for correct VWAP
+        self.typical_prices = deque(maxlen=self.lookback)
         self.volumes = deque(maxlen=self.lookback)
-        self.vwap_values = deque(maxlen=50)
+        
+        # Track position state for exit on mean reversion
         self.last_signal = None
+        self.entry_price = None
+        self.entry_vwap = None
+        self.position_type = None  # 'buy' or 'sell'
 
     def on_start(self):
-        self.closes.clear()
+        self.typical_prices.clear()
         self.volumes.clear()
-        self.vwap_values.clear()
+        self.last_signal = None
+        self.entry_price = None
+        self.entry_vwap = None
+        self.position_type = None
 
     def _calculate_vwap(self):
-        """Calculate VWAP from close & volume."""
-        if len(self.closes) < 5:
+        """VWAP = Σ(Typical Price × Vol) / Σ(Vol)"""
+        if len(self.typical_prices) < 5:
             return None
         
-        closes = list(self.closes)
-        volumes = list(self.volumes)
+        tp_list = list(self.typical_prices)
+        vol_list = list(self.volumes)
         
-        typical_prices = closes
-        pv = sum(p * v for p, v in zip(typical_prices, volumes))
-        v_sum = sum(volumes)
+        pv = sum(p * v for p, v in zip(tp_list, vol_list))
+        v_sum = sum(vol_list)
         
-        if v_sum == 0:
-            return None
-        
-        vwap = pv / v_sum
-        return vwap
+        return pv / v_sum if v_sum > 0 else None
 
     def on_bar(self, bar):
+        high = float(bar["high"])
+        low = float(bar["low"])
         close = float(bar["close"])
         volume = float(bar["volume"])
         
-        self.closes.append(close)
+        # Typical Price for correct VWAP
+        typical_price = (high + low + close) / 3.0
+        self.typical_prices.append(typical_price)
         self.volumes.append(volume)
         
         vwap = self._calculate_vwap()
         if vwap is None:
             return None
         
-        self.vwap_values.append(vwap)
-        
         deviation_threshold = vwap * (self.deviation_pct / 100)
         
-        # SELL: Price too high above VWAP
-        if close > vwap + deviation_threshold and self.last_signal != "sell":
-            self.last_signal = "sell"
-            return {
-                "action": "sell",
-                "price": close,
-                "stoploss": close * 1.01  # 1% stoploss
-            }
+        # --- EXIT: Price returned to VWAP (mean reversion complete) ---
+        if self.position_type == "buy" and close >= self.entry_vwap:
+            self.position_type = None
+            return {"action": "sell", "price": close, "reason": "mean_reversion"}
         
-        # BUY: Price too low below VWAP
-        if close < vwap - deviation_threshold and self.last_signal != "buy":
-            self.last_signal = "buy"
+        if self.position_type == "sell" and close <= self.entry_vwap:
+            self.position_type = None
+            return {"action": "buy", "price": close, "reason": "mean_reversion"}
+        
+        # --- ENTRY: Price deviates from VWAP ---
+        if (close < vwap - deviation_threshold and 
+            self.position_type is None):
+            self.position_type = "buy"
+            self.entry_price = close
+            self.entry_vwap = vwap
             return {
                 "action": "buy",
                 "price": close,
-                "stoploss": close * 0.99  # 1% stoploss
+                "stoploss": close * 0.98
+            }
+        
+        if (close > vwap + deviation_threshold and 
+            self.position_type is None):
+            self.position_type = "sell"
+            self.entry_price = close
+            self.entry_vwap = vwap
+            return {
+                "action": "sell",
+                "price": close,
+                "stoploss": close * 1.02
             }
         
         return None
