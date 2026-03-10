@@ -21,7 +21,10 @@ set TOTP_SECRET=your_totp_secret
 install requirements txt
 
 ### 2. Run Backtest
+
 ```bash
+#Sanity Check
+python sanity_check.py
 python backtest_all_strategies.py
 ```
 

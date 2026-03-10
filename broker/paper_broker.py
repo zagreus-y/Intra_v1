@@ -14,7 +14,7 @@ import uuid
 import time
 from typing import Dict, Any, Optional, List
 from enum import Enum
-
+from .base_broker import BaseBroker
 
 class OrderStatus(Enum):
     PENDING = "pending"
@@ -31,7 +31,7 @@ class OrderType(Enum):
     BRACKET = "bracket"
 
 
-class PaperBrokerV2:
+class PaperBroker(BaseBroker):
     """
     Realistic paper trading broker with tick-based execution.
     """
