@@ -5,26 +5,25 @@ A professional, modular intraday trading framework for NSE equities with SmartAP
 ## 🎯 Quick Start
 
 ### 1. Setup Environment
-```bash
-python setup.ps1  # Windows
-# or manually:
-pip install -r requirements.txt
+For Windows: Edit setup.ps1 to fill your credentials
+Run ./setup.ps1 
+if error: 
 ```
-
-Set environment variables:
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+For Linux set environment variables:
 ```bash
 set API_KEY=your_angel_api_key
 set CLIENT_CODE=your_client_code  
 set PASSWORD=your_trading_pin
 set TOTP_SECRET=your_totp_secret
 ```
+install requirements txt
 
 ### 2. Run Backtest
 ```bash
 python backtest_all_strategies.py
 ```
-
-This runs the recommended **Multi-Signal Hybrid** strategy on 20 stocks with 15 days of data.
 
 ### 3. If Results Look Good
 - Deploy to **Paper Trading** (next phase)
@@ -36,8 +35,7 @@ This runs the recommended **Multi-Signal Hybrid** strategy on 20 stocks with 15 
 
 ### Core Files
 - **`backtest_all_strategies.py`** - Main entry point for backtesting
-  - Only example you need
-  - Tests MultiSignalHybrid strategy
+  - Test IntradayStrategies from ./strategies on 5m Candles for past 15 days, for a pool of hardcoded 20 stocks.
   - Change this file for customization
 
 ### Engines & Brokers
@@ -48,14 +46,10 @@ This runs the recommended **Multi-Signal Hybrid** strategy on 20 stocks with 15 
   - Dynamic capital allocation
   
 - **`broker/paper_broker_v2.py`** - Paper trading simulator
-  - Tick-based execution
-  - Realistic slippage
-  - Order lifecycle management
+  - only skeleton/ todo
 
 - **`broker/smartapi_broker.py`** - Real broker (Angel One)
-  - Live order placement
-  - Position tracking
-  - Ready for production
+  - only skeleton/ todo
 
 ### Data Providers
 - **`data/base_data_provider.py`** - Abstract interface
@@ -65,16 +59,11 @@ This runs the recommended **Multi-Signal Hybrid** strategy on 20 stocks with 15 
   - Market hours check
 
 ### Strategies
-- **`strategies/multi_signal_hybrid.py`** ⭐ **BEST**
-  - Trend filtering + RSI + Volume + VWAP
-  - Expected: 55-65% win rate
-  - Multi-signal confirmation reduces false entries
-
 - **`strategies/intraday_strategies.py`** - Alternative strategies
-  - `TrendFollowingWithFilter` - Best overall
-  - `VWAPMeanReversion` - For choppy markets  
-  - `RSIOverbought` - Counter-trend trades
-  - `BreakoutStrategy` - For trending days
+  - `TrendFollowingWithFilter`
+  - `VWAPMeanReversion`
+  - `RSIOverbought`
+  - `BreakoutStrategy`
 
 - **`strategies/base_strategy.py`** - Abstract base for all strategies
 - **`strategies/trend_filter.py`** - Trend detection helper
@@ -90,8 +79,8 @@ This runs the recommended **Multi-Signal Hybrid** strategy on 20 stocks with 15 
 
 ### Engine Improvements
 ✅ **Daily Management**
-- Square-off all positions at EOD (true intraday)
-- Reset strategies daily (fresh start)
+- Square-off all positions at EOD
+- Reset strategies daily
 - Reset daily counters
 
 ✅ **Signal Quality**
@@ -100,14 +89,13 @@ This runs the recommended **Multi-Signal Hybrid** strategy on 20 stocks with 15 
   - Let indicators stabilize
 - Minimum trade value (₹3000 default)
   - Prevents capital fragmentation
-  - Avoids scalping unprofitable trades
 
 ✅ **Execution**
-- Dynamic slippage by price tier
+- Dynamic slippage by price tier/ not implemented yet.
   - Large caps: 0.05%
   - Mid caps: 0.15%
   - Small caps: 0.5%
-- Angel One brokerage model: min(₹20, 0.1%)
+- Angel One brokerage model: min(₹20, 0.1%) per trade
 
 ✅ **Metrics**
 - Win rate, Profit Factor, Sharpe ratio
@@ -130,25 +118,6 @@ This runs the recommended **Multi-Signal Hybrid** strategy on 20 stocks with 15 
 - Breakout (trend confirmation)
 - Dynamic stoploss
 
----
-
-## 📊 Expected Results
-
-### Before (Simple SMA)
-```
-Win Rate:      25%
-Return:        -1.32%
-Profit Factor: 0.60x
-Sharpe:        -3.25
-```
-
-### After (Multi-Signal Hybrid)
-```
-Win Rate:      55-65%
-Return:        +5-15%
-Profit Factor: 1.2-1.5x
-Sharpe:        0.5-1.5
-```
 
 ---
 
@@ -158,11 +127,10 @@ Sharpe:        0.5-1.5
 ```
 python backtest_all_strategies.py
 ↓
-Check metrics: Win Rate > 50%? Profit Factor > 1.0?
-↓
-If YES → Paper Trading
-If NO  → Optimize parameters
-```
+Next
+ Optimize parameters
+ Paper Trading
+
 
 ### 2. Paper Trading Phase (Next)
 ```
@@ -228,13 +196,6 @@ engine = PortfolioBacktestEngineV2(
 
 ## 📝 Trading Rules
 
-### Entry Conditions
-1. **Trend Filter**: Trade with trend only
-2. **Signal Confirmation**: Need 2+ confirmations
-3. **Not in Warmup**: Skip first 20 candles of day
-4. **Minimum Position**: Trade value > ₹3000
-5. **Position Limits**: Max 5 concurrent, 15 trades/day
-
 ### Exit Conditions
 1. **Stoploss Hit**: 2% below entry
 2. **Profit Target**: Built into strategy signals
@@ -252,31 +213,11 @@ engine = PortfolioBacktestEngineV2(
 
 ---
 
-## 🐛 Troubleshooting
-
-**No data fetched?**
-- Check SmartAPI credentials in environment variables
-- Verify market hours (9:15 AM - 3:30 PM IST)
-
-**Low win rate in backtest?**
-- Add more stocks (50-100 for better sample)
-- Try different strategy from `intraday_strategies.py`
-- Increase warmup_candles to avoid early noise
-- Check minimum trade value isn't too high
-
-**High drawdown?**
-- Reduce max_positions (try 3 instead of 5)
-- Increase stoploss % in strategy
-- Reduce max_trades_per_day
-
-
 ## 🎯 Next Steps
 
 1. ✅ Run `backtest_all_strategies.py` 
 2. ✅ Review results (win rate, profit factor)
-3. ⏳ Paper trading simulator (next phase)
-4. ⏳ SmartAPI integration for live trading
-5. ⏳ Advanced: Multi-strategy ensemble, ML optimization
+3. Make Screening script to find treding stocks for the day from the pool of Stocks
 
 ---
 
@@ -298,8 +239,4 @@ Position Management
 P&L Tracking & Logging
 ```
 
----
 
-**Status**: 🟢 Ready for backtesting and paper trading
-
-**Last Updated**: March 10, 2026

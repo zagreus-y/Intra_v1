@@ -29,7 +29,7 @@ class VWAPMeanReversion(BaseStrategy):
 
     def __init__(self, config):
         super().__init__(config)
-        self.deviation_pct = config.get("deviation_pct", 2.0)
+        self.deviation_pct = config.get("deviation_pct", 0.5)
         self.lookback = config.get("lookback", 100)
         
         # Store Typical Price = (H+L+C)/3 for correct VWAP
@@ -68,7 +68,14 @@ class VWAPMeanReversion(BaseStrategy):
         low = float(bar["low"])
         close = float(bar["close"])
         volume = float(bar["volume"])
-        
+        current_day = bar["timestamp"].date()
+
+        if hasattr(self, "current_day") and self.current_day != current_day:
+            self.typical_prices.clear()
+            self.volumes.clear()
+            self.position_type = None
+
+        self.current_day = current_day
         # Typical Price for correct VWAP
         typical_price = (high + low + close) / 3.0
         self.typical_prices.append(typical_price)
@@ -81,14 +88,16 @@ class VWAPMeanReversion(BaseStrategy):
         deviation_threshold = vwap * (self.deviation_pct / 100)
         
         # --- EXIT: Price returned to VWAP (mean reversion complete) ---
-        if self.position_type == "buy" and close >= self.entry_vwap:
+        # EXIT for BUY
+        if self.position_type == "buy" and close >= vwap:
             self.position_type = None
-            return {"action": "sell", "price": close, "reason": "mean_reversion"}
-        
-        if self.position_type == "sell" and close <= self.entry_vwap:
+            return {"action": "sell", "price": close}
+
+        # EXIT for SELL
+        if self.position_type == "sell" and close <= vwap:
             self.position_type = None
-            return {"action": "buy", "price": close, "reason": "mean_reversion"}
-        
+            return {"action": "buy", "price": close}
+                
         # --- ENTRY: Price deviates from VWAP ---
         if (close < vwap - deviation_threshold and 
             self.position_type is None):

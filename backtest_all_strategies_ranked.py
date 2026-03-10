@@ -16,7 +16,7 @@ Output:
 import pandas as pd
 import numpy as np
 from data.smartapi_data import SmartAPIDataProvider
-from backtest.portfolio_backtest_v2 import PortfolioBacktestEngineV2
+from backtest.portfolio_backtest_v2_ranked import PortfolioBacktestEngineV2
 from strategies.multi_signal_hybrid import MultiSignalHybrid
 from strategies.intraday_strategies import (
     VWAPMeanReversion,
@@ -48,6 +48,7 @@ CONFIG = {
     "LOOKBACK_DAYS": 15,
     "INTERVAL": "5m"
 }
+
 # Stock Pool
 STOCK_POOL = [
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
@@ -88,7 +89,7 @@ STRATEGIES = [
         "cls": VWAPMeanReversion,
         "description": "Mean reversion around VWAP",
         "config": {
-            "deviation_pct": 0.7,
+            "deviation_pct": 2.0,
             "lookback": 100
         }
     },
