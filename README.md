@@ -6,7 +6,10 @@ A professional, modular intraday trading framework for NSE equities with SmartAP
 
 ### 1. Setup Environment
 For Windows: Edit setup.ps1 to fill your credentials
-Run ./setup.ps1 
+Run 
+```bash
+./setup.ps1
+```
 if error: 
 ```
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
