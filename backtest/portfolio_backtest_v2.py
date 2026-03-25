@@ -108,9 +108,10 @@ class PortfolioBacktestEngineV2:
             return 0.005   # 0.5%
     
     # ============ POSITION MANAGEMENT ============
-    def _capital_per_position(self) -> float:
-        """Allocate equal capital per position."""
-        return self.initial_capital / self.max_positions
+    def _capital_per_position(self, score):
+        base = self.initial_capital / self.max_positions
+        return base * (0.5 + score)  
+        # range: 0.5x → 1.5x
     
     def _can_open_position(self, symbol: str) -> bool:
         """Check if we can open a new position."""
@@ -120,7 +121,7 @@ class PortfolioBacktestEngineV2:
             return False
         if self.daily_trade_count >= self.max_trades_per_day:
             return False
-        if self.cash < self._capital_per_position() * 0.5:
+        if self.cash < self.min_trade_value:
             return False
         return True
     
@@ -135,6 +136,7 @@ class PortfolioBacktestEngineV2:
         symbol: str,
         price: float,
         ts: datetime,
+        score: float = 0.5,
         stop_loss: Optional[float] = None
     ) -> bool:
         """Execute a buy order. Returns True if successful."""
@@ -146,7 +148,7 @@ class PortfolioBacktestEngineV2:
         if not self._can_open_position(symbol):
             return False
         
-        capital = self._capital_per_position()
+        capital = self._capital_per_position(score)
         slippage_pct = self._get_slippage(price)
         exec_price = price * (1 + slippage_pct)
         
@@ -366,11 +368,19 @@ class PortfolioBacktestEngineV2:
                     score = signal.get("score", 0)
                     signals.append((symbol, signal, score))
             
-            # 🔥 SORT BY SCORE (strong signals first)
-            signals.sort(key=lambda x: x[2], reverse=True)
+            # Normalize scores to 0-1 range
+            if signals:
+                scores_list = [s[2] for s in signals]
+                max_score = max(scores_list) if scores_list else 1
+                normalized_signals = [
+                    (sym, sig, score / max_score if max_score > 0 else score)
+                    for sym, sig, score in signals
+                ]
+            else:
+                normalized_signals = []
             
             # Execute signals in score order
-            for symbol, signal, score in signals:
+            for symbol, signal, score in normalized_signals:
                 action = signal.get("action")
                 
                 if action == "buy":
@@ -378,6 +388,7 @@ class PortfolioBacktestEngineV2:
                         symbol,
                         signal.get("price", data[symbol].loc[ts, "close"]),
                         ts,
+                        score,
                         stop_loss=signal.get("stoploss")
                     )
                 

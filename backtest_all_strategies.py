@@ -42,12 +42,12 @@ TOTP_SECRET = os.getenv("TOTP_SECRET")
 
 # Backtest Parameters
 CONFIG = {
-    "TOTAL_CAPITAL": 100000,
+    "TOTAL_CAPITAL": 10000,
     "MAX_POSITIONS": 5,
     "MAX_TRADES_PER_DAY": 15,
-    "MIN_TRADE_VALUE": 3000.0,
+    "MIN_TRADE_VALUE": 500.0,
     "WARMUP_CANDLES": 20,
-    "LOOKBACK_DAYS": 15,
+    "LOOKBACK_DAYS": 30,
     "INTERVAL": "5m"
 }
 # Load stock symbols from file
@@ -130,7 +130,7 @@ STRATEGIES = [
 
 # Add to CONFIGURATION section:
 SELECTION_ENGINE_CONFIG = {
-    "TOP_K": 5,  # Select top 15 stocks per day
+    "TOP_K": 10,  # Select top 15 stocks per day
     "RANGE_WEIGHT": 0.4,
     "MOMENTUM_WEIGHT": 0.4,
     "VOLUME_WEIGHT": 0.2
@@ -147,11 +147,7 @@ def daily_stock_selection(data: dict[str, pd.DataFrame],
         Dict[date -> list of selected symbols]
     """
     feature_engine = FeatureEngine()
-    selection_engine = SelectionEngine(
-        range_weight=selection_config["RANGE_WEIGHT"],
-        momentum_weight=selection_config["MOMENTUM_WEIGHT"],
-        volume_weight=selection_config["VOLUME_WEIGHT"]
-    )
+    selection_engine = SelectionEngine()
     
     daily_selection = {}
     

@@ -8,99 +8,98 @@ import numpy as np
 from typing import Dict, List, Tuple
 
 
+import numpy as np
+
 class FeatureEngine:
-    """Compute features from first 3 candles (15 mins) of the day."""
-    
-    def compute(self, day_data: Dict[str, 'pd.DataFrame']) -> Dict[str, Dict[str, float]]:
-        """
-        Args:
-            day_data: Dict[symbol -> DataFrame] with OHLCV
-            
-        Returns:
-            Dict[symbol -> {range, momentum, volume, avg_price}]
-        """
+    def compute(self, day_data):
         features = {}
-        
+
+        # --- Get index (for relative strength) ---
+        index_symbol = "NIFTY"
+        index_df = day_data.get(index_symbol)
+
+        if index_df is not None and len(index_df) >= 3:
+            idx_open = index_df.iloc[0]["open"]
+            idx_close = index_df.iloc[2]["close"]
+            index_return = (idx_close - idx_open) / idx_open
+        else:
+            index_return = 0
+
         for symbol, df in day_data.items():
             if len(df) < 3:
                 continue
-            
+
             first_3 = df.iloc[:3]
-            
+
             open_price = first_3.iloc[0]["open"]
             high = first_3["high"].max()
             low = first_3["low"].min()
             close = first_3.iloc[-1]["close"]
             volume = first_3["volume"].sum()
-            
-            # Avoid division by zero
-            if open_price <= 0:
+
+            # --- Previous close (for gap) ---
+            prev_close = df.iloc[0]["close"] if len(df) > 1 else open_price
+
+            if open_price <= 0 or prev_close <= 0:
                 continue
-            
+
+            # --- FEATURES ---
+
+            # 1. Gap %
+            gap = (open_price - prev_close) / prev_close
+
+            # 2. Range (volatility)
             range_pct = (high - low) / open_price
+
+            # 3. Momentum (first 15m)
             momentum = (close - open_price) / open_price
-            
+
+            # 4. RVOL (approx: normalize by log volume)
+            rvol = np.log1p(volume)
+
+            # 5. VWAP
+            typical_price = (first_3["high"] + first_3["low"] + first_3["close"]) / 3
+            vwap = (typical_price * first_3["volume"]).sum() / first_3["volume"].sum()
+
+            vwap_dist = (close - vwap) / vwap if vwap > 0 else 0
+
+            # 6. Relative Strength vs index
+            stock_return = momentum
+            rs = stock_return - index_return
+
             features[symbol] = {
+                "gap": gap,
                 "range": range_pct,
                 "momentum": momentum,
-                "volume": volume,
-                "avg_price": first_3["close"].mean()
+                "rvol": rvol,
+                "vwap_dist": vwap_dist,
+                "rs": rs
             }
-        
+
         return features
 
 
 class SelectionEngine:
-    """Score and rank stocks for trading."""
-    
-    def __init__(self, 
-                 range_weight: float = 0.4,
-                 momentum_weight: float = 0.4,
-                 volume_weight: float = 0.2):
-        """
-        Args:
-            range_weight: Weight for price range
-            momentum_weight: Weight for momentum
-            volume_weight: Weight for volume
-        """
-        self.range_weight = range_weight
-        self.momentum_weight = momentum_weight
-        self.volume_weight = volume_weight
-        
-        # Ensure weights sum to 1
-        total = range_weight + momentum_weight + volume_weight
-        self.range_weight /= total
-        self.momentum_weight /= total
-        self.volume_weight /= total
-    
-    def score(self, features: Dict[str, Dict]) -> Dict[str, float]:
-        """Score each symbol."""
-        scored = {}
-        
-        for symbol, f in features.items():
-            # Normalize volume with log
-            vol_score = np.log1p(f["volume"]) / 10  # Scale down
-            
+    def score(self, features):
+        scores = {}
+
+        for s, f in features.items():
             score = (
-                self.range_weight * f["range"] +
-                self.momentum_weight * abs(f["momentum"]) +
-                self.volume_weight * vol_score
+                0.30 * f["rvol"] +
+                0.20 * f["range"] +
+                0.15 * abs(f["gap"]) +
+                0.15 * abs(f["vwap_dist"]) +
+                0.20 * f["rs"]
             )
-            scored[symbol] = score
-        
-        return scored
-    
-    def select_and_rank(self, 
-                        features: Dict[str, Dict], 
-                        top_k: int = 15) -> Tuple[List[str], Dict[str, float]]:
-        """
-        Select top K stocks by score.
-        
-        Returns:
-            (selected_symbols, scores_dict)
-        """
+            scores[s] = score
+
+        return scores
+
+    def select_and_rank(self, features, top_k=15):
         scores = self.score(features)
+
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
         selected = [s for s, _ in ranked[:top_k]]
-        
+
         return selected, scores
