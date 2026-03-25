@@ -20,18 +20,18 @@ Write-Host "API environment variables set."
 if (Test-Path ".venv") {
 Write-Host "Virtual environment already exists."
 
-```
+
 # Activate existing venv
 . .\.venv\Scripts\Activate.ps1
 
 Write-Host "Virtual environment activated."
-```
+
 
 }
 else {
 Write-Host "Creating virtual environment..."
 
-```
+
 # Create venv
 python -m venv .venv
 
@@ -44,6 +44,6 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 
 Write-Host "Setup complete. Dependencies installed."
-```
+
 
 }
