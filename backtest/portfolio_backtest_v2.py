@@ -271,18 +271,19 @@ class PortfolioBacktestEngineV2:
             self.strategies[symbol] = strat
     
     # ============ MAIN BACKTEST ============
-    def run(self, data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+    def run(self, data: Dict[str, pd.DataFrame], daily_selection: Dict = None) -> Dict[str, Any]:
         """
-        Run multi-symbol portfolio backtest.
+        Run multi-symbol portfolio backtest with optional daily stock filtering.
         
         Args:
             data: Dict[symbol -> DataFrame with OHLCV]
-            
+            daily_selection: Dict[date -> list of selected symbols] for daily filtering
+        
         Returns:
             Results dictionary with metrics
         """
         
-        # Initialize strategies
+        # Initialize all strategies first (even for filtered symbols)
         for symbol in data:
             cfg = dict(self.strategy_config)
             cfg["symbol"] = symbol
@@ -295,11 +296,14 @@ class PortfolioBacktestEngineV2:
         for df in data.values():
             idx = set(df.index)
             common_index = idx if common_index is None else common_index & idx
-        
+    
         if not common_index:
             raise ValueError("No common timestamps across symbols")
         
         timeline = sorted(common_index)
+        
+        # Track which symbols are allowed today
+        allowed_symbols = set(data.keys())
         
         # Backtest loop
         for ts in timeline:
@@ -315,6 +319,12 @@ class PortfolioBacktestEngineV2:
                             prev_price = float(data[symbol].loc[prev_ts, "close"])
                             self._execute_sell(symbol, prev_price, prev_ts, reason="eod_squareoff")
                 
+                # Update allowed symbols for today
+                if daily_selection and current_day in daily_selection:
+                    allowed_symbols = set(daily_selection[current_day])
+                else:
+                    allowed_symbols = set(data.keys())
+                
                 # Reset daily state
                 self._reset_daily_state()
                 self._reset_strategies_daily()
@@ -329,9 +339,13 @@ class PortfolioBacktestEngineV2:
                 row = data[symbol].loc[ts]
                 self._check_stoploss(symbol, float(row["close"]), ts)
             
-            # Get signals from strategies
+            # Get signals from strategies (only for allowed symbols)
             signals = []
             for symbol in data:
+                # Skip if not in today's allowed list
+                if symbol not in allowed_symbols:
+                    continue
+                
                 if symbol not in self.strategies:
                     continue
                 
@@ -348,10 +362,15 @@ class PortfolioBacktestEngineV2:
                 signal = self.strategies[symbol].on_bar(bar)
                 
                 if signal:
-                    signals.append((symbol, signal))
+                    # Include score in signal for ranking
+                    score = signal.get("score", 0)
+                    signals.append((symbol, signal, score))
             
-            # Execute signals (FIFO)
-            for symbol, signal in signals:
+            # 🔥 SORT BY SCORE (strong signals first)
+            signals.sort(key=lambda x: x[2], reverse=True)
+            
+            # Execute signals in score order
+            for symbol, signal, score in signals:
                 action = signal.get("action")
                 
                 if action == "buy":

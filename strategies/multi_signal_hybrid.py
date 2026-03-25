@@ -144,12 +144,14 @@ class MultiSignalHybrid(BaseStrategy):
             if signals_count >= 2:
                 self.last_signal = "buy"
                 self.last_entry_price = close
-                
+                # Score based on how many confirmations
+                score = min(1.0, signals_count / 4)  # 4 signals max = score 1.0
                 return {
                     "action": "buy",
                     "price": close,
                     "stoploss": close * 0.98,  # 2% stoploss
-                    "signals": signals_count
+                    "signals": signals_count,
+                    "score": score  # ADD THIS
                 }
         
         # --- SHORT ENTRY ---
@@ -175,12 +177,13 @@ class MultiSignalHybrid(BaseStrategy):
             if signals_count >= 2:
                 self.last_signal = "sell"
                 self.last_entry_price = close
-                
+                score = min(1.0, signals_count / 4)
                 return {
                     "action": "sell",
                     "price": close,
                     "stoploss": close * 1.02,  # 2% stoploss
-                    "signals": signals_count
+                    "signals": signals_count,
+                    "score": score  # ADD THIS
                 }
         
         # --- EXIT LOGIC (partial) ---
@@ -190,7 +193,8 @@ class MultiSignalHybrid(BaseStrategy):
             return {
                 "action": "sell",
                 "price": close,
-                "reason": "trend_reversal"
+                "reason": "trend_reversal",
+                "score": 0.3  # Lower score for exits
             }
         
         if self.last_signal == "sell" and trend != "down":
@@ -198,7 +202,8 @@ class MultiSignalHybrid(BaseStrategy):
             return {
                 "action": "buy",
                 "price": close,
-                "reason": "trend_reversal"
+                "reason": "trend_reversal",
+                "score": 0.3
             }
         
         return None

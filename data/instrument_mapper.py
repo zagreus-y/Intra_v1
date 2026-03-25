@@ -14,14 +14,14 @@ class AngelInstrumentMapper:
         force_refresh=True → re-download master file
         """
         if force_refresh or not os.path.exists(CACHE_FILE):
-            print("Downloading instrument master...")
+            # print("Downloading instrument master...")
             self.symbol_to_token = self._download_and_build()
             self._save_cache()
         else:
-            print("Loading instruments from cache...")
+            # print("Loading instruments from cache...")
             self.symbol_to_token = self._load_cache()
 
-        print(f"Loaded {len(self.symbol_to_token)} NSE equity instruments")
+        # print(f"Loaded {len(self.symbol_to_token)} NSE equity instruments")
 
     # -----------------------------------
     # Download and build mapping

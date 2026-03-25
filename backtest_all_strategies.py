@@ -27,6 +27,8 @@ from strategies.intraday_strategies import (
 from strategies.vwap_scalper import VWAPScalper
 import os
 from datetime import datetime
+from stock_selection_engine import FeatureEngine, SelectionEngine
+from collections import defaultdict
 
 # ============================================================================
 # CONFIGURATION
@@ -48,13 +50,18 @@ CONFIG = {
     "LOOKBACK_DAYS": 15,
     "INTERVAL": "5m"
 }
-# Stock Pool
-STOCK_POOL = [
-    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
-    "MARUTI", "BAJAJFINSV", "LT", "ITC", "WIPRO",
-    "HDFC", "SUNPHARMA", "ASIANPAINT", "DRREDDY", "HEROMOTOCO",
-    "SBIN", "AXISBANK", "KOTAKBANK", "INDUSIND", "BAJAJFINSV"
-]
+# Load stock symbols from file
+def load_stock_symbols(filepath="./data/symbol_list.txt"):
+    """Load stock symbols from file."""
+    try:
+        with open(filepath, 'r') as f:
+            symbols = [s.strip().strip('"').strip("'") for line in f for s in line.split(',')]
+            return [s for s in symbols if s]
+    except FileNotFoundError:
+        print(f"✗ Symbol file not found: {filepath}")
+        exit(1)
+
+STOCK_POOL = load_stock_symbols()
 
 # Strategy Definitions
 STRATEGIES = [
@@ -121,66 +128,65 @@ STRATEGIES = [
     }
 ]
 
-# ============================================================================
-# DATA FETCHING
-# ============================================================================
+# Add to CONFIGURATION section:
+SELECTION_ENGINE_CONFIG = {
+    "TOP_K": 5,  # Select top 15 stocks per day
+    "RANGE_WEIGHT": 0.4,
+    "MOMENTUM_WEIGHT": 0.4,
+    "VOLUME_WEIGHT": 0.2
+}
 
-def fetch_market_data(stocks, interval, lookback_days):
+# New function: Group data by day and select stocks
+def daily_stock_selection(data: dict[str, pd.DataFrame], 
+                          config: dict,
+                          selection_config: dict) -> dict[str, list[str]]:
     """
-    Fetch OHLCV data for all stocks.
+    For each day, select top K stocks based on first 3 candles.
     
     Returns:
-        Dict: symbol -> DataFrame
-        int: Count of successfully fetched stocks
+        Dict[date -> list of selected symbols]
     """
-    print("\n" + "="*80)
-    print("FETCHING MARKET DATA")
-    print("="*80)
-    print(f"Interval: {interval}, Lookback: {lookback_days} days\n")
+    feature_engine = FeatureEngine()
+    selection_engine = SelectionEngine(
+        range_weight=selection_config["RANGE_WEIGHT"],
+        momentum_weight=selection_config["MOMENTUM_WEIGHT"],
+        volume_weight=selection_config["VOLUME_WEIGHT"]
+    )
     
-    try:
-        data_provider = SmartAPIDataProvider(API_KEY, CLIENT_CODE, PASSWORD, TOTP_SECRET)
-    except Exception as e:
-        print(f"✗ SmartAPI connection failed: {e}")
-        exit(1)
+    daily_selection = {}
     
-    data = {}
-    failed = []
+    # Get all dates
+    all_dates = set()
+    for df in data.values():
+        all_dates.update(df.index.date)
     
-    for symbol in stocks:
-        try:
-            print(f"  {symbol:<12}", end=" ", flush=True)
-            df = data_provider.get_candles(symbol, interval=interval, lookback_days=lookback_days)
-            
-            if df.empty:
-                print("✗ no data")
-                failed.append(symbol)
-                continue
-            
-            data[symbol] = df
-            print(f"✓ {len(df):>5} candles")
+    for date in sorted(all_dates):
+        # Get data for this day
+        day_data = {}
+        for symbol, df in data.items():
+            day_df = df[df.index.date == date]
+            if not day_df.empty and len(day_df) >= 3:
+                day_data[symbol] = day_df
         
-        except Exception as e:
-            print(f"✗ {str(e)[:35]}")
-            failed.append(symbol)
+        if not day_data:
+            continue
+        
+        # Compute features and select
+        features = feature_engine.compute(day_data)
+        selected, scores = selection_engine.select_and_rank(
+            features, 
+            top_k=selection_config["TOP_K"]
+        )
+        
+        daily_selection[date] = selected
+        
+        print(f"  {date}: Selected {len(selected)} stocks | Top: {selected[:3]}")
     
-    print(f"\n✓ Loaded {len(data)}/{len(stocks)} stocks")
-    if failed:
-        print(f"✗ Failed: {', '.join(failed)}")
-    
-    return data, len(data)
+    return daily_selection
 
-# ============================================================================
-# BACKTEST EXECUTION
-# ============================================================================
-
-def run_strategy_backtest(strategy_info, market_data, config):
-    """
-    Run a single strategy backtest.
-    
-    Returns:
-        Dict: Results or None if failed
-    """
+# Modify run_strategy_backtest to use daily selection
+def run_strategy_backtest(strategy_info, market_data, config, daily_selection):
+    """Run a single strategy backtest with daily stock selection."""
     strategy_name = strategy_info["name"]
     strategy_cls = strategy_info["cls"]
     strategy_config = strategy_info["config"]
@@ -198,7 +204,7 @@ def run_strategy_backtest(strategy_info, market_data, config):
             dynamic_slippage=True
         )
         
-        result = engine.run(market_data)
+        result = engine.run(market_data, daily_selection=daily_selection)
         
         return {
             "strategy": strategy_name,
@@ -215,27 +221,18 @@ def run_strategy_backtest(strategy_info, market_data, config):
             "error": str(e)
         }
 
-def execute_backtests(strategies, market_data, config):
-    """
-    Run all strategy backtests.
-    
-    Returns:
-        List: Results for each strategy
-    """
-    print("\n" + "="*80)
-    print("RUNNING BACKTESTS")
-    print("="*80 + "\n")
+def execute_backtests(strategies, market_data, config, daily_selection):
+    """Run all strategy backtests."""
+    print(f"\nRunning {len(strategies)} strategy backtests...\n")
     
     results = []
     success_count = 0
     
     for i, strategy_info in enumerate(strategies, 1):
         name = strategy_info["name"]
-        desc = strategy_info["description"]
-        
         print(f"[{i}/{len(strategies)}] {name:<25}", end=" ", flush=True)
         
-        backtest_result = run_strategy_backtest(strategy_info, market_data, config)
+        backtest_result = run_strategy_backtest(strategy_info, market_data, config, daily_selection)
         
         if backtest_result["error"]:
             print(f"✗ {backtest_result['error'][:40]}")
@@ -249,8 +246,7 @@ def execute_backtests(strategies, market_data, config):
         
         results.append(backtest_result)
     
-    print(f"\n✓ Completed: {success_count}/{len(strategies)} successful\n")
-    
+    print(f"\n✓ {success_count}/{len(strategies)} successful\n")
     return results
 
 # ============================================================================
@@ -425,6 +421,56 @@ def print_comparison_analysis(df):
     print(f"  High Quality:          {quality}/{num_strategies} (WR>30% AND PF>1.0x)")
 
 # ============================================================================
+# DATA FETCHING
+# ============================================================================
+
+def fetch_market_data(stocks, interval, lookback_days):
+    """
+    Fetch OHLCV data for all stocks.
+    
+    Returns:
+        Dict: symbol -> DataFrame
+        int: Count of successfully fetched stocks
+    """
+    print("\n" + "="*80)
+    print("FETCHING MARKET DATA FOR TOP 250 STOCKS")
+    print("="*80)
+    print(f"Interval: {interval}, Lookback: {lookback_days} days\n")
+    
+    try:
+        data_provider = SmartAPIDataProvider(API_KEY, CLIENT_CODE, PASSWORD, TOTP_SECRET)
+    except Exception as e:
+        print(f"✗ SmartAPI connection failed: {e}")
+        exit(1)
+    
+    data = {}
+    failed = []
+    
+    for i, symbol in enumerate(stocks, 1):
+        try:
+            print(f"  [{i:>3}/{len(stocks)}] {symbol:<12}", end=" ", flush=True)
+            df = data_provider.get_candles(symbol, interval=interval, lookback_days=lookback_days)
+            
+            if df.empty:
+                print("✗ no data")
+                failed.append(symbol)
+                continue
+            
+            data[symbol] = df
+            print(f"✓ {len(df):>5} candles")
+        
+        except Exception as e:
+            print(f"✗ {str(e)[:35]}")
+            failed.append(symbol)
+    
+    print(f"\n✓ Loaded {len(data)}/{len(stocks)} stocks")
+    if failed:
+        print(f"✗ Failed: {len(failed)} stocks")
+        if len(failed) <= 20:
+            print(f"   {', '.join(failed[:20])}")
+    
+    return data, len(data)
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -433,9 +479,7 @@ def main():
     
     print("\n")
     print("╔" + "="*78 + "╗")
-    print("║" + " "*78 + "║")
     print("║" + "INTRADAY STRATEGY COMPARISON BACKTEST".center(78) + "║")
-    print("║" + " "*78 + "║")
     print("╚" + "="*78 + "╝")
     
     # Fetch data
@@ -449,29 +493,28 @@ def main():
         print("\n✗ No data fetched. Exiting.")
         exit(1)
     
-    # Run backtests
-    backtest_results = execute_backtests(STRATEGIES, data, CONFIG)
+    # Daily stock selection
+    print(f"\nSelecting top {SELECTION_ENGINE_CONFIG['TOP_K']} stocks per day...")
+    daily_selection = daily_stock_selection(data, CONFIG, SELECTION_ENGINE_CONFIG)
     
-    # Process results
+    # Run backtests
+    backtest_results = execute_backtests(STRATEGIES, data, CONFIG, daily_selection)
+    
+    # Process and report
     df_results = process_results(backtest_results)
     
     if df_results.empty:
         print("\n✗ No successful backtests. Exiting.")
         exit(1)
     
-    # Print reports
     print_summary_table(df_results)
     print_rankings(df_results)
     print_detailed_results(df_results, top_n=3)
     print_comparison_analysis(df_results)
     
-    # Save results
     csv_filename = f"strategy_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     df_results.to_csv(csv_filename, index=False)
     print(f"\n✓ Results saved to: {csv_filename}")
-    
-    print("\n" + "="*80)
-    print("✓ Backtest complete")
     print("="*80 + "\n")
 
 if __name__ == "__main__":

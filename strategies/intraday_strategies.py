@@ -88,37 +88,44 @@ class VWAPMeanReversion(BaseStrategy):
         deviation_threshold = vwap * (self.deviation_pct / 100)
         
         # --- EXIT: Price returned to VWAP (mean reversion complete) ---
-        # EXIT for BUY
+        # EXIT for BUY (line ~65)
         if self.position_type == "buy" and close >= vwap:
             self.position_type = None
-            return {"action": "sell", "price": close}
+            return {"action": "sell", "price": close, "score": 0.5}
 
-        # EXIT for SELL
+        # EXIT for SELL (line ~70)
         if self.position_type == "sell" and close <= vwap:
             self.position_type = None
-            return {"action": "buy", "price": close}
+            return {"action": "buy", "price": close, "score": 0.5}
                 
         # --- ENTRY: Price deviates from VWAP ---
-        if (close < vwap - deviation_threshold and 
-            self.position_type is None):
+        # ENTRY BUY (line ~75)
+        if (close < vwap - deviation_threshold and self.position_type is None):
             self.position_type = "buy"
             self.entry_price = close
             self.entry_vwap = vwap
+            # Score: how far below VWAP (0-1)
+            deviation_ratio = abs(close - vwap) / vwap
+            score = min(1.0, deviation_ratio * 5)  # Scale to 0-1
             return {
                 "action": "buy",
                 "price": close,
-                "stoploss": close * 0.98
+                "stoploss": close * 0.98,
+                "score": score
             }
         
-        if (close > vwap + deviation_threshold and 
-            self.position_type is None):
+        # ENTRY SELL (line ~85)
+        if (close > vwap + deviation_threshold and self.position_type is None):
             self.position_type = "sell"
             self.entry_price = close
             self.entry_vwap = vwap
+            deviation_ratio = abs(close - vwap) / vwap
+            score = min(1.0, deviation_ratio * 5)
             return {
                 "action": "sell",
                 "price": close,
-                "stoploss": close * 1.02
+                "stoploss": close * 1.02,
+                "score": score
             }
         
         return None
@@ -180,22 +187,28 @@ class RSIOverbought(BaseStrategy):
         
         rsi = self._calculate_rsi()
         
-        # SHORT: RSI overbought
+        # SHORT: RSI overbought (line ~135)
         if rsi > self.overbought and self.last_signal != "sell":
             self.last_signal = "sell"
+            # Score: how extreme is RSI (0-1)
+            score = min(1.0, (rsi - self.overbought) / (100 - self.overbought))
             return {
                 "action": "sell",
                 "price": close,
-                "stoploss": close * 1.015  # 1.5% stoploss
+                "stoploss": close * 1.015,
+                "score": score
             }
         
-        # LONG: RSI oversold
+        # LONG: RSI oversold (line ~142)
         if rsi < self.oversold and self.last_signal != "buy":
             self.last_signal = "buy"
+            # Score: how extreme is RSI (0-1)
+            score = min(1.0, (self.oversold - rsi) / self.oversold)
             return {
                 "action": "buy",
                 "price": close,
-                "stoploss": close * 0.985  # 1.5% stoploss
+                "stoploss": close * 0.985,
+                "score": score
             }
         
         return None
@@ -247,19 +260,27 @@ class BreakoutStrategy(BaseStrategy):
         # LONG: Break above previous high
         if close > prev_high and self.last_signal != "buy":
             self.last_signal = "buy"
+            # Score: how much above breakout level
+            breakout_strength = (close - prev_high) / (prev_high * 0.01)  # % above
+            score = min(1.0, breakout_strength / 5)  # Normalize
             return {
                 "action": "buy",
                 "price": close,
-                "stoploss": prev_low  # Stoploss at previous low
+                "stoploss": prev_low,
+                "score": score
             }
         
         # SHORT: Break below previous low
         if close < prev_low and self.last_signal != "sell":
             self.last_signal = "sell"
+            # Score: how much below breakout level
+            breakout_strength = (prev_low - close) / (prev_low * 0.01)
+            score = min(1.0, breakout_strength / 5)
             return {
                 "action": "sell",
                 "price": close,
-                "stoploss": prev_high  # Stoploss at previous high
+                "stoploss": prev_high,
+                "score": score
             }
         
         return None
@@ -328,22 +349,29 @@ class TrendFollowingWithFilter(BaseStrategy):
         rsi = self._get_rsi()
         
         # Only trade in direction of trend
-        # LONG: Uptrend + RSI not too high
+        # LONG: Uptrend (line ~235)
         if trend == "up" and rsi < 70 and self.last_signal != "buy":
             self.last_signal = "buy"
+            # Score: RSI closer to 30-50 range = better
+            rsi_score = 1.0 - abs(rsi - 50) / 50  # 0-1, peaks at 50
+            score = rsi_score * 0.8 + 0.2  # Base 0.2, up to 1.0
             return {
                 "action": "buy",
                 "price": close,
-                "stoploss": close * 0.98  # 2% stoploss
+                "stoploss": close * 0.98,
+                "score": score
             }
         
-        # SHORT: Downtrend + RSI not too low
+        # SHORT: Downtrend (line ~243)
         if trend == "down" and rsi > 30 and self.last_signal != "sell":
             self.last_signal = "sell"
+            rsi_score = 1.0 - abs(rsi - 50) / 50
+            score = rsi_score * 0.8 + 0.2
             return {
                 "action": "sell",
                 "price": close,
-                "stoploss": close * 1.02  # 2% stoploss
+                "stoploss": close * 1.02,
+                "score": score
             }
         
         return None
